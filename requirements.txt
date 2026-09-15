@@ -8,4 +8,4 @@ xgboost==3.3.0
 feature_engine==1.9.4
 category_encoders==2.9.0
 imbalanced-learn==0.14.0
-streamlit==1.51.0
+streamlit==1.49.0
