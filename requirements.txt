@@ -1,0 +1,11 @@
+pandas==2.3.3
+numpy==2.3.5
+matplotlib==3.10.6
+seaborn==0.13.2
+scikit-learn==1.7.2
+ipykernel==6.31.0
+xgboost==3.3.0
+feature_engine==1.9.4
+category_encoders==2.9.0
+imbalanced-learn==0.14.0
+streamlit==1.51.0
