@@ -4,7 +4,6 @@ import joblib
 import pandas as pd
 import streamlit as st
 
-
 MODEL_PATH = (
     Path(__file__).resolve().parent.parent
     / "final_model"
@@ -16,28 +15,58 @@ DATA_PATH = (
     / "hotel_booking_2017_cleaned.csv"
 )
 
-model = joblib.load(MODEL_PATH)
-data = pd.read_csv(DATA_PATH)
 BEST_THRESHOLD = 0.7425999999999402
 
 RISK_BINS = [-0.001, 0.3, BEST_THRESHOLD, 1.001]
 RISK_LABELS = ["Low Risk", "Medium Risk", "High Risk"]
 
-# REFUND_ACTION_MAP = {
-#     "Refundable": "Full refund, resell the room",
-#     "No Deposit": "No refund applies, resell the room",
-#     "Non Refund": "No need to refund, resell the room"
-# }
-
-
 ACTION_MAP = {
     "Low Risk": "Routine monitoring without intervention",
     "Medium Risk": "Send an automated reminder",
-    "High Risk": "Reconfirmation to guest (still come/change the date/cancel)"
+    "High Risk": "Reconfirmation to guest (still come/change the date/cancel)",
 }
 
-def get_recommended_action(risk_label):
-    return ACTION_MAP.get(risk_label, "Unknown risk level")
+RISK_STYLE_CLASS = {
+    "Low Risk": "risk-low",
+    "Medium Risk": "",
+    "High Risk": "risk-high",
+}
+
+RISK_ROW_COLOR = {
+    "Low Risk": "background-color: #f0fdf4",
+    "Medium Risk": "background-color: #fffbeb",
+    "High Risk": "background-color: #fef2f2",
+}
+
+RISK_EMOJI_LABEL = {
+    "Low Risk": "🟢 Low Risk",
+    "Medium Risk": "🟡 Medium Risk",
+    "High Risk": "🔴 High Risk",
+}
+
+# pandas Styler hard-caps how many cells it will render (default 262,144).
+# Row-coloring a large batch blows past this and can also be slow/memory
+# heavy, so it's only attempted below this threshold.
+STYLER_CELL_LIMIT = 262_144
+
+
+# ---------------------------------------------------------------------------
+# Cached loaders
+# ---------------------------------------------------------------------------
+
+@st.cache_resource
+def load_model():
+    return joblib.load(MODEL_PATH)
+
+
+@st.cache_data
+def load_data():
+    return pd.read_csv(DATA_PATH)
+
+
+model = load_model()
+data = load_data()
+
 
 num_cols = [
     "lead_time",
@@ -57,14 +86,8 @@ num_cols = [
     "total_of_special_requests",
 ]
 
-discrete_num_cols = [
-    column for column in num_cols
-    if column != "adr"
-]
-
-continuous_num_cols = [
-    "adr",
-]
+discrete_num_cols = [column for column in num_cols if column != "adr"]
+continuous_num_cols = ["adr"]
 
 cat_cols = [
     "hotel",
@@ -81,6 +104,63 @@ cat_cols = [
     "agent",
     "company",
 ]
+
+RAW_INPUT_COLS = num_cols + cat_cols
+
+
+# ---------------------------------------------------------------------------
+# Shared feature engineering / prediction logic
+# (used by both the single-booking form and the batch CSV upload, so the
+# two paths can never silently drift apart)
+# ---------------------------------------------------------------------------
+
+def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    df["has_children"] = (df["children"] > 0).astype(int)
+    df["has_babies"] = (df["babies"] > 0).astype(int)
+    df["is_family"] = ((df["has_children"] == 1) | (df["has_babies"] == 1)).astype(int)
+    df["has_agent"] = (df["agent"] != "no agent").astype(int)
+    df["has_company"] = (df["company"] != "no company").astype(int)
+    df["room_type_changed"] = (
+        df["assigned_room_type"] != df["reserved_room_type"]
+    ).astype(int)
+    return df
+
+
+def classify_risk(probabilities):
+    return pd.cut(probabilities, bins=RISK_BINS, labels=RISK_LABELS, right=False)
+
+
+def get_recommended_action(risk_label):
+    return ACTION_MAP.get(risk_label, "Unknown risk level")
+
+
+def compute_predictions(engineered_df: pd.DataFrame):
+    probabilities = model.predict_proba(engineered_df)[:, 1]
+    predictions = (probabilities >= BEST_THRESHOLD).astype(int)
+    risk_labels = classify_risk(probabilities)
+    actions = [get_recommended_action(label) for label in risk_labels]
+    return probabilities, predictions, risk_labels, actions
+
+
+def fill_missing_batch(df: pd.DataFrame) -> pd.DataFrame:
+    """Best-effort fill for missing values in an uploaded CSV, using medians
+    / modes from the reference dataset. This does NOT replace a real
+    imputation strategy from your pipeline - it just keeps obviously
+    incomplete rows from crashing the whole batch."""
+    filled = df.copy()
+    for column in num_cols:
+        if column in filled.columns and filled[column].isna().any():
+            filled[column] = filled[column].fillna(data[column].median())
+    for column in cat_cols:
+        if column in filled.columns and filled[column].isna().any():
+            filled[column] = filled[column].fillna(data[column].mode().iloc[0])
+    return filled
+
+
+# ---------------------------------------------------------------------------
+# Page setup / styling
+# ---------------------------------------------------------------------------
 
 st.set_page_config(page_title="Hotel Booking Prediction")
 
@@ -200,131 +280,227 @@ st.markdown(
 st.title("Hotel Booking Cancellation Prediction")
 st.caption("Enter the booking details to generate a cancellation prediction.")
 
-with st.form("prediction_form"):
-    values = {}
+single_tab, batch_tab = st.tabs(["Single Booking", "Batch (CSV Upload)"])
 
-    st.subheader("Booking Details")
 
-    for start in range(0, len(num_cols), 2):
-        input_columns = st.columns(2)
+# ---------------------------------------------------------------------------
+# TAB 1: single booking form (original flow, refactored to use the shared
+# engineer_features / compute_predictions helpers)
+# ---------------------------------------------------------------------------
 
-        for container, column in zip(input_columns, num_cols[start:start + 2]):
-            with container:
-                if column in discrete_num_cols:
-                    values[column] = st.number_input(
-                        column,
-                        min_value=0,
-                        value=int(data[column].median()),
-                        step=1,
+with single_tab:
+    with st.form("prediction_form"):
+        values = {}
+
+        st.subheader("Booking Details")
+
+        for start in range(0, len(num_cols), 2):
+            input_columns = st.columns(2)
+            for container, column in zip(input_columns, num_cols[start:start + 2]):
+                with container:
+                    if column in discrete_num_cols:
+                        values[column] = st.number_input(
+                            column,
+                            min_value=0,
+                            value=int(data[column].median()),
+                            step=1,
+                        )
+                    else:
+                        values[column] = st.number_input(
+                            column,
+                            value=float(data[column].median()),
+                            step=0.01,
+                            format="%.2f",
+                        )
+
+        st.subheader("Booking Categories")
+
+        for start in range(0, len(cat_cols), 2):
+            input_columns = st.columns(2)
+            for container, column in zip(input_columns, cat_cols[start:start + 2]):
+                with container:
+                    options = data[column].dropna().unique().tolist()
+                    values[column] = st.selectbox(column, options)
+
+        submitted = st.form_submit_button("Predict")
+
+    if submitted:
+        raw_input = pd.DataFrame([values])
+        input_data = engineer_features(raw_input)
+
+        probabilities, predictions, risk_labels, actions = compute_predictions(input_data)
+        prediction_probability = probabilities[0]
+        prediction = predictions[0]
+        risk_label = risk_labels[0]
+        recommended_action = actions[0]
+
+        assert (risk_label == "High Risk") == (prediction == 1), (
+            "RISK_BINS is not in sync with BEST_THRESHOLD - check the configuration above."
+        )
+
+        result_text = (
+            "Booking will be canceled"
+            if prediction == 1
+            else "Booking will not be canceled"
+        )
+        risk_style_class = RISK_STYLE_CLASS[risk_label]
+
+        result_columns = st.columns(2)
+        with result_columns[0]:
+            st.markdown(
+                f"""
+                <div class="result-card probability-card">
+                    <div class="result-title">Cancellation Probability</div>
+                    <div class="result-value probability-value">
+                        {prediction_probability:.2%}
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        with result_columns[1]:
+            st.markdown(
+                f"""
+                <div class="result-card outcome-card">
+                    <div class="result-title">Prediction Result</div>
+                    <div class="result-value">{result_text}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        detail_columns = st.columns(2)
+        with detail_columns[0]:
+            st.markdown(
+                f"""
+                <div class="result-card risk-card {risk_style_class}">
+                    <div class="result-title">Risk Tier</div>
+                    <div class="result-value">{risk_label}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        with detail_columns[1]:
+            st.markdown(
+                f"""
+                <div class="result-card action-card">
+                    <div class="result-title">Recommended Action</div>
+                    <div class="result-value">{recommended_action}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+
+# ---------------------------------------------------------------------------
+# TAB 2: batch prediction from an uploaded CSV
+# ---------------------------------------------------------------------------
+
+with batch_tab:
+    st.subheader("Upload a CSV of bookings")
+    st.caption(
+        "The file must contain all columns listed below. Missing values are "
+        "filled with the median (numeric) or mode (categorical) from the "
+        "reference dataset as a fallback."
+    )
+
+    template_df = pd.DataFrame(columns=RAW_INPUT_COLS)
+    st.download_button(
+        "Download CSV template",
+        data=template_df.to_csv(index=False).encode("utf-8"),
+        file_name="booking_template.csv",
+        mime="text/csv",
+    )
+
+    uploaded_file = st.file_uploader("Booking CSV", type=["csv"])
+
+    if uploaded_file is not None:
+        try:
+            uploaded_df = pd.read_csv(uploaded_file)
+        except Exception as exc:
+            st.error(f"Could not read this file as CSV. Details: {exc}")
+            uploaded_df = None
+
+        if uploaded_df is not None:
+            missing_columns = set(RAW_INPUT_COLS) - set(uploaded_df.columns)
+            if missing_columns:
+                st.error(
+                    "The uploaded CSV is missing required columns: "
+                    + ", ".join(sorted(missing_columns))
+                )
+            else:
+                working_df = fill_missing_batch(uploaded_df[RAW_INPUT_COLS])
+                engineered_batch = engineer_features(working_df)
+
+                try:
+                    probabilities, predictions, risk_labels, actions = compute_predictions(
+                        engineered_batch
+                    )
+                except Exception as exc:
+                    st.error(
+                        "Prediction failed on this batch, most likely due to a "
+                        f"category value the model hasn't seen before. Details: {exc}"
                     )
                 else:
-                    values[column] = st.number_input(
-                        column,
-                        value=float(data[column].median()),
-                        step=0.01,
-                        format="%.2f",
+                    results_df = engineered_batch.copy()
+                    results_df.insert(0, "recommended_action", actions)
+                    results_df.insert(0, "risk_tier", risk_labels.astype(str))
+                    results_df.insert(
+                        0,
+                        "prediction",
+                        [
+                            "Will be canceled" if p == 1 else "Will not be canceled"
+                            for p in predictions
+                        ],
                     )
+                    results_df.insert(0, "cancellation_probability", probabilities)
 
-    st.subheader("Booking Categories")
+                    total = len(results_df)
+                    high_risk = int((results_df["risk_tier"] == "High Risk").sum())
+                    medium_risk = int((results_df["risk_tier"] == "Medium Risk").sum())
+                    low_risk = int((results_df["risk_tier"] == "Low Risk").sum())
 
-    for start in range(0, len(cat_cols), 2):
-        input_columns = st.columns(2)
+                    metric_columns = st.columns(4)
+                    metric_columns[0].metric("Total bookings", total)
+                    metric_columns[1].metric("High risk", high_risk)
+                    metric_columns[2].metric("Medium risk", medium_risk)
+                    metric_columns[3].metric("Low risk", low_risk)
 
-        for container, column in zip(input_columns, cat_cols[start:start + 2]):
-            with container:
-                options = data[column].dropna().unique().tolist()
-                values[column] = st.selectbox(column, options)
+                    risk_filter = st.multiselect(
+                        "Filter by risk tier",
+                        options=RISK_LABELS,
+                        default=RISK_LABELS,
+                    )
+                    filtered_df = results_df[results_df["risk_tier"].isin(risk_filter)]
 
-    values["has_children"] = int(values["children"] > 0)
-    values["has_babies"] = int(values["babies"] > 0)
-    values["is_family"] = int(
-        values["has_children"] == 1 or values["has_babies"] == 1
-    )
-    values["has_agent"] = int(values["agent"] != "no agent")
-    values["has_company"] = int(values["company"] != "no company")
-    values["room_type_changed"] = int(
-        values["assigned_room_type"] != values["reserved_room_type"]
-    )
+                    # Emoji-prefixed risk tier for quick visual scanning - this
+                    # works at any batch size, unlike row background coloring.
+                    display_df = filtered_df.copy()
+                    display_df["risk_tier"] = display_df["risk_tier"].map(
+                        RISK_EMOJI_LABEL
+                    ).fillna(display_df["risk_tier"])
 
-    submitted = st.form_submit_button("Predict")
+                    num_cells = display_df.shape[0] * display_df.shape[1]
+                    if num_cells <= STYLER_CELL_LIMIT:
+                        styled_df = display_df.style.format(
+                            {"cancellation_probability": "{:.2%}"}
+                        )
+                        st.dataframe(styled_df, use_container_width=True)
+                    else:
+                        display_df = display_df.copy()
+                        display_df["cancellation_probability"] = display_df[
+                            "cancellation_probability"
+                        ].map("{:.2%}".format)
+                        st.caption(
+                            f"Showing {len(display_df):,} rows without extra row "
+                            "styling - the batch is too large for full cell "
+                            "formatting. Risk tier is still color-coded via emoji."
+                        )
+                        st.dataframe(display_df, use_container_width=True)
 
-if submitted:
-    input_data = pd.DataFrame([values])
-
-    prediction_probability = model.predict_proba(input_data)[0, 1]
-    prediction = int(prediction_probability >= BEST_THRESHOLD)
-
-    risk_label = pd.cut(
-        [prediction_probability],
-        bins=RISK_BINS,
-        labels=RISK_LABELS,
-        right=False,
-    )[0]
-
-    assert (risk_label == "High Risk") == (prediction == 1), (
-        "RISK_BINS is not in sync with BEST_THRESHOLD - check the configuration above."
-    )
-
-    recommended_action = get_recommended_action(risk_label)
-
-    result = (
-        "Booking will be canceled"
-        if prediction == 1
-        else "Booking will not be canceled"
-    )
-
-    risk_style_class = {
-        "Low Risk": "risk-low",
-        "Medium Risk": "",
-        "High Risk": "risk-high",
-    }[risk_label]
-
-    result_columns = st.columns(2)
-
-    with result_columns[0]:
-        st.markdown(
-            f"""
-            <div class="result-card probability-card">
-                <div class="result-title">Cancellation Probability</div>
-                <div class="result-value probability-value">
-                    {prediction_probability:.2%}
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    with result_columns[1]:
-        st.markdown(
-            f"""
-            <div class="result-card outcome-card">
-                <div class="result-title">Prediction Result</div>
-                <div class="result-value">{result}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    detail_columns = st.columns(2)
-
-    with detail_columns[0]:
-        st.markdown(
-            f"""
-            <div class="result-card risk-card {risk_style_class}">
-                <div class="result-title">Risk Tier</div>
-                <div class="result-value">{risk_label}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    with detail_columns[1]:
-        st.markdown(
-            f"""
-            <div class="result-card action-card">
-                <div class="result-title">Recommended Action</div>
-                <div class="result-value">{recommended_action}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+                    st.download_button(
+                        "Download results as CSV",
+                        data=filtered_df.to_csv(index=False).encode("utf-8"),
+                        file_name="batch_predictions.csv",
+                        mime="text/csv",
+                    )
