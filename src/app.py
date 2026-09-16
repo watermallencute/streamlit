@@ -26,10 +26,10 @@ ACTION_MAP = {
     "High Risk": "Reconfirmation to guest (still come/change the date/cancel)",
 }
 
-RISK_STYLE_CLASS = {
-    "Low Risk": "risk-low",
-    "Medium Risk": "",
-    "High Risk": "risk-high",
+RISK_PILL_CLASS = {
+    "Low Risk": "low",
+    "Medium Risk": "medium",
+    "High Risk": "high",
 }
 
 RISK_ROW_COLOR = {
@@ -147,110 +147,179 @@ st.set_page_config(page_title="Hotel Booking Prediction")
 st.markdown(
     """
     <style>
+    @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
+
+    html, body, [class*="css"] {
+        font-family: 'IBM Plex Sans', sans-serif;
+    }
+
     .block-container {
-        max-width: 1100px;
-        padding-top: 2rem;
+        max-width: 1080px;
+        padding-top: 2.2rem;
         padding-bottom: 3rem;
+    }
+
+    h1 {
+        font-weight: 700 !important;
+        letter-spacing: -0.01em;
+        border-bottom: 2px solid #35507A;
+        padding-bottom: 0.6rem;
+        margin-bottom: 0 !important;
+    }
+
+    /* description / brief panel */
+    .brief {
+        border-left: 3px solid #35507A;
+        background: #FBFAF7;
+        padding: 0.95rem 1.3rem;
+        margin: 1.1rem 0 1.6rem 0;
+        font-size: 0.92rem;
+        line-height: 1.6;
+        color: #4B5567;
+    }
+    .brief b { color: #1B2431; font-weight: 600; }
+    .brief code {
+        background: #F0EEE7;
+        color: #1B2431;
+        padding: 0.05rem 0.35rem;
+        border-radius: 3px;
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 0.85em;
+    }
+    .brief ol, .brief ul { margin: 0.4rem 0 0.7rem 1.15rem; padding: 0; }
+    .brief li { margin-bottom: 0.25rem; }
+    .brief .brief-title {
+        font-weight: 600;
+        color: #1B2431;
+        font-size: 0.8rem;
+        letter-spacing: 0.02em;
+        margin-bottom: 0.35rem;
+    }
+
+    /* section labels replacing default subheaders */
+    .section-label {
+        font-weight: 600;
+        font-size: 0.98rem;
+        color: #1B2431;
+        border-bottom: 1px solid #D9D4C7;
+        padding-bottom: 0.4rem;
+        margin: 1.5rem 0 1rem 0;
     }
 
     div.stButton > button {
         width: 100%;
         height: 3rem;
-        font-size: 1.05rem;
+        font-size: 1.02rem;
         font-weight: 600;
+        background: #1B2431;
+        color: #FBFAF7;
+        border: none;
+        border-radius: 4px;
+    }
+    div.stButton > button:hover {
+        background: #35507A;
+        color: #fff;
     }
 
-    .result-card {
-        padding: 1.5rem;
-        border-radius: 14px;
-        min-height: 135px;
-        border: 1px solid #bfdbfe;
-        background: #eff6ff !important;
-        text-align: center;
-        margin-top: 1.5rem;
+    /* result / risk-assessment panel */
+    .assessment {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 1.6rem;
+        border: 1px solid #D9D4C7;
+        border-left: 5px solid #35507A;
+        border-radius: 6px;
+        margin-top: 1.7rem;
+        padding: 1.3rem 1.6rem;
+        background: #ffffff;
     }
+    .assessment.low { border-left-color: #1F7A4D; }
+    .assessment.medium { border-left-color: #B45309; }
+    .assessment.high { border-left-color: #B3231C; }
 
-    .result-title {
-        color: #1e3a8a !important;
-        font-size: 1rem;
+    .assessment-figure {
+        flex: 0 0 150px;
+    }
+    .assessment-figure .figure {
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 2.3rem;
         font-weight: 600;
-        margin-bottom: 0.75rem;
+        color: #1B2431;
+        line-height: 1.1;
     }
-
-    .result-value {
-        color: #172554 !important;
-        font-size: 1.45rem;
-        font-weight: 700;
-        line-height: 1.35;
+    .assessment-figure .figure-label {
+        font-size: 0.72rem;
+        color: #4B5567;
+        margin-top: 0.4rem;
     }
-
-    .probability-value {
-        font-size: 2.4rem;
+    .assessment-details {
+        flex: 1 1 320px;
+        border-left: 1px solid #F0EEE7;
+        padding-left: 1.6rem;
     }
-
-    .outcome-card {
-        border-color: #bbf7d0;
-        background: #f0fdf4 !important;
+    .assessment-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1rem;
+        padding: 0.5rem 0;
+        border-bottom: 1px solid #F0EEE7;
     }
-
-    .outcome-card .result-title {
-        color: #166534 !important;
+    .assessment-row:last-child { border-bottom: none; }
+    .assessment-row .label {
+        font-size: 0.82rem;
+        color: #4B5567;
+        white-space: nowrap;
     }
-
-    .outcome-card .result-value {
-        color: #14532d !important;
-    }
-
-    .risk-card {
-        border-color: #fde68a;
-        background: #fffbeb !important;
-    }
-
-    .risk-card .result-title {
-        color: #92400e !important;
-    }
-
-    .risk-card .result-value {
-        color: #78350f !important;
-    }
-
-    .risk-card.risk-low {
-        border-color: #bbf7d0;
-        background: #f0fdf4 !important;
-    }
-
-    .risk-card.risk-low .result-title,
-    .risk-card.risk-low .result-value {
-        color: #166534 !important;
-    }
-
-    .risk-card.risk-high {
-        border-color: #fecaca;
-        background: #fef2f2 !important;
-    }
-
-    .risk-card.risk-high .result-title,
-    .risk-card.risk-high .result-value {
-        color: #991b1b !important;
-    }
-
-    .action-card {
-        border-color: #e5e7eb;
-        background: #f9fafb !important;
-        text-align: left;
-    }
-
-    .action-card .result-title {
-        color: #374151 !important;
-        text-align: center;
-    }
-
-    .action-card .result-value {
-        color: #111827 !important;
-        font-size: 1.1rem;
+    .assessment-row .value {
         font-weight: 600;
-        line-height: 1.5;
-        text-align: center;
+        font-size: 0.95rem;
+        text-align: right;
+        color: #1B2431;
+    }
+    .risk-pill {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.22rem 0.7rem;
+        border-radius: 999px;
+        font-size: 0.85rem;
+        font-weight: 600;
+        border: 1px solid;
+    }
+    .risk-pill.low { color: #1F7A4D; background: #EAF6EE; border-color: #BFE3CC; }
+    .risk-pill.medium { color: #B45309; background: #FFFBEB; border-color: #FDE68A; }
+    .risk-pill.high { color: #B3231C; background: #FCEBEA; border-color: #F2C4C0; }
+
+    /* batch summary stats (replaces st.metric so risk tiers can carry their own color) */
+    .stat-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1rem;
+        margin: 0.6rem 0 1.4rem 0;
+    }
+    .stat {
+        flex: 1 1 140px;
+        border: 1px solid #D9D4C7;
+        border-top: 3px solid #35507A;
+        border-radius: 6px;
+        padding: 0.85rem 1.1rem;
+        background: #ffffff;
+    }
+    .stat.high { border-top-color: #B3231C; }
+    .stat.medium { border-top-color: #B45309; }
+    .stat.low { border-top-color: #1F7A4D; }
+    .stat .stat-value {
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 1.6rem;
+        font-weight: 600;
+        color: #1B2431;
+        line-height: 1.1;
+    }
+    .stat .stat-label {
+        font-size: 0.78rem;
+        color: #4B5567;
+        margin-top: 0.3rem;
     }
     </style>
     """,
@@ -258,7 +327,27 @@ st.markdown(
 )
 
 st.title("Hotel Booking Cancellation Prediction")
-st.caption("Enter the booking details to generate a cancellation prediction.")
+
+st.markdown(
+    """
+    <div class="brief">
+        <div class="brief-title">Tentang</div>
+        Aplikasi ini memperkirakan risiko pembatalan booking hotel dengan model <b>XGBoost</b>
+        yang dilatih pada data booking 2015&ndash;2016 dan diuji pada data 2017.
+        Setiap booking mendapat probabilitas pembatalan, tier risiko, dan rekomendasi tindakan
+        operasional.
+        <div class="brief-title">Cara Kerja</div>
+        <ol>
+            <li>Isi detail booking, atau unggah CSV berisi banyak booking.</li>
+            <li>Data diproses lewat feature engineering yang sama seperti saat training.</li>
+            <li>Model menghitung probabilitas pembatalan, lalu mengelompokkannya ke 3 tier risiko (Low, Medium, High).</li>
+            <li>Setiap tier risiko dipetakan ke rekomendasi tindakan: monitoring rutin,
+                reminder otomatis, atau konfirmasi ulang ke tamu.</li>
+        </ol>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 single_tab, batch_tab = st.tabs(["Single Booking", "Batch (CSV Upload)"])
 
@@ -266,7 +355,7 @@ with single_tab:
     with st.form("prediction_form"):
         values = {}
 
-        st.subheader("Booking Details")
+        st.markdown('<div class="section-label">Booking Details</div>', unsafe_allow_html=True)
 
         for start in range(0, len(num_cols), 2):
             input_columns = st.columns(2)
@@ -287,7 +376,7 @@ with single_tab:
                             format="%.2f",
                         )
 
-        st.subheader("Booking Categories")
+        st.markdown('<div class="section-label">Booking Categories</div>', unsafe_allow_html=True)
 
         for start in range(0, len(cat_cols), 2):
             input_columns = st.columns(2)
@@ -317,57 +406,39 @@ with single_tab:
             if prediction == 1
             else "Booking will not be canceled"
         )
-        risk_style_class = RISK_STYLE_CLASS[risk_label]
+        risk_pill_class = RISK_PILL_CLASS[risk_label]
 
-        result_columns = st.columns(2)
-        with result_columns[0]:
-            st.markdown(
-                f"""
-                <div class="result-card probability-card">
-                    <div class="result-title">Cancellation Probability</div>
-                    <div class="result-value probability-value">
-                        {prediction_probability:.2%}
+        st.markdown(
+            f"""
+            <div class="assessment {risk_pill_class}">
+                <div class="assessment-figure">
+                    <div class="figure">{prediction_probability:.1%}</div>
+                    <div class="figure-label">cancellation probability</div>
+                </div>
+                <div class="assessment-details">
+                    <div class="assessment-row">
+                        <span class="label">Outcome</span>
+                        <span class="value">{result_text}</span>
+                    </div>
+                    <div class="assessment-row">
+                        <span class="label">Risk tier</span>
+                        <span class="value">
+                            <span class="risk-pill {risk_pill_class}">{risk_label}</span>
+                        </span>
+                    </div>
+                    <div class="assessment-row">
+                        <span class="label">Recommended action</span>
+                        <span class="value">{recommended_action}</span>
                     </div>
                 </div>
-                """,
-                unsafe_allow_html=True,
-            )
-        with result_columns[1]:
-            st.markdown(
-                f"""
-                <div class="result-card outcome-card">
-                    <div class="result-title">Prediction Result</div>
-                    <div class="result-value">{result_text}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-        detail_columns = st.columns(2)
-        with detail_columns[0]:
-            st.markdown(
-                f"""
-                <div class="result-card risk-card {risk_style_class}">
-                    <div class="result-title">Risk Tier</div>
-                    <div class="result-value">{risk_label}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-        with detail_columns[1]:
-            st.markdown(
-                f"""
-                <div class="result-card action-card">
-                    <div class="result-title">Recommended Action</div>
-                    <div class="result-value">{recommended_action}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
 
 with batch_tab:
-    st.subheader("Upload a CSV of bookings")
+    st.markdown('<div class="section-label">Upload a CSV of bookings</div>', unsafe_allow_html=True)
     st.caption(
         "The file must contain all columns listed below. Missing values are "
         "filled with the median (numeric) or mode (categorical) from the "
@@ -430,11 +501,29 @@ with batch_tab:
                     medium_risk = int((results_df["risk_tier"] == "Medium Risk").sum())
                     low_risk = int((results_df["risk_tier"] == "Low Risk").sum())
 
-                    metric_columns = st.columns(4)
-                    metric_columns[0].metric("Total bookings", total)
-                    metric_columns[1].metric("High risk", high_risk)
-                    metric_columns[2].metric("Medium risk", medium_risk)
-                    metric_columns[3].metric("Low risk", low_risk)
+                    st.markdown(
+                        f"""
+                        <div class="stat-row">
+                            <div class="stat">
+                                <div class="stat-value">{total}</div>
+                                <div class="stat-label">Total bookings</div>
+                            </div>
+                            <div class="stat high">
+                                <div class="stat-value">{high_risk}</div>
+                                <div class="stat-label">High risk</div>
+                            </div>
+                            <div class="stat medium">
+                                <div class="stat-value">{medium_risk}</div>
+                                <div class="stat-label">Medium risk</div>
+                            </div>
+                            <div class="stat low">
+                                <div class="stat-value">{low_risk}</div>
+                                <div class="stat-label">Low risk</div>
+                            </div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
 
                     risk_filter = st.multiselect(
                         "Filter by risk tier",
