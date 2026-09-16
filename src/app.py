@@ -44,15 +44,7 @@ RISK_EMOJI_LABEL = {
     "High Risk": "🔴 High Risk",
 }
 
-# pandas Styler hard-caps how many cells it will render (default 262,144).
-# Row-coloring a large batch blows past this and can also be slow/memory
-# heavy, so it's only attempted below this threshold.
 STYLER_CELL_LIMIT = 262_144
-
-
-# ---------------------------------------------------------------------------
-# Cached loaders
-# ---------------------------------------------------------------------------
 
 @st.cache_resource
 def load_model():
@@ -107,13 +99,6 @@ cat_cols = [
 
 RAW_INPUT_COLS = num_cols + cat_cols
 
-
-# ---------------------------------------------------------------------------
-# Shared feature engineering / prediction logic
-# (used by both the single-booking form and the batch CSV upload, so the
-# two paths can never silently drift apart)
-# ---------------------------------------------------------------------------
-
 def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df["has_children"] = (df["children"] > 0).astype(int)
@@ -156,11 +141,6 @@ def fill_missing_batch(df: pd.DataFrame) -> pd.DataFrame:
         if column in filled.columns and filled[column].isna().any():
             filled[column] = filled[column].fillna(data[column].mode().iloc[0])
     return filled
-
-
-# ---------------------------------------------------------------------------
-# Page setup / styling
-# ---------------------------------------------------------------------------
 
 st.set_page_config(page_title="Hotel Booking Prediction")
 
@@ -282,12 +262,6 @@ st.caption("Enter the booking details to generate a cancellation prediction.")
 
 single_tab, batch_tab = st.tabs(["Single Booking", "Batch (CSV Upload)"])
 
-
-# ---------------------------------------------------------------------------
-# TAB 1: single booking form (original flow, refactored to use the shared
-# engineer_features / compute_predictions helpers)
-# ---------------------------------------------------------------------------
-
 with single_tab:
     with st.form("prediction_form"):
         values = {}
@@ -392,10 +366,6 @@ with single_tab:
             )
 
 
-# ---------------------------------------------------------------------------
-# TAB 2: batch prediction from an uploaded CSV
-# ---------------------------------------------------------------------------
-
 with batch_tab:
     st.subheader("Upload a CSV of bookings")
     st.caption(
@@ -473,8 +443,6 @@ with batch_tab:
                     )
                     filtered_df = results_df[results_df["risk_tier"].isin(risk_filter)]
 
-                    # Emoji-prefixed risk tier for quick visual scanning - this
-                    # works at any batch size, unlike row background coloring.
                     display_df = filtered_df.copy()
                     display_df["risk_tier"] = display_df["risk_tier"].map(
                         RISK_EMOJI_LABEL
